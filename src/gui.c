@@ -103,6 +103,8 @@
 #define NWIPE_GUI_MAIN_Y  8
 #define NWIPE_GUI_MAIN_X  0
 
+#define SKIP_DEV_PREFIX 5
+
 
 /* Window pointers. */
 WINDOW* footer_window;
@@ -339,17 +341,50 @@ void nwipe_gui_free( void )
  */
 
 	/* Free ncurses resources. */
-	del_panel( footer_panel   );
-	del_panel( header_panel	  );
-	del_panel( main_panel     );
-	del_panel( options_panel  );
-	del_panel( stats_panel    );
-	delwin( footer_window  );
-	delwin( header_window  );
-	delwin( main_window    );
-	delwin( options_window );
-	delwin( stats_window   );
-	endwin();
+	if( del_panel( footer_panel ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting footer panel failed!." );
+   }
+	if( del_panel( header_panel ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting header panel failed!." );
+   }
+	if( del_panel( main_panel ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting main panel failed!." );
+   }
+	if( del_panel( options_panel  ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting options panel failed!." );
+   }
+	if( del_panel( stats_panel ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting stats panel failed!." );
+   }
+	if( delwin( footer_window ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting footer window failed!." );
+   }
+	if( delwin( header_window ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting header window failed!." );
+   }
+	if( delwin( main_window ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting main window failed!." );
+   }
+	if( delwin( options_window ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting options window failed!." );
+   }
+	if( delwin( stats_window ) != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Deleting stats window failed!." );
+   }
+	if( endwin() != OK )
+   {
+      nwipe_log( NWIPE_LOG_ERROR, "Curses endwin() failed !" );
+   }
 
 } /* nwipe_gui_free */
 
@@ -367,6 +402,8 @@ void nwipe_gui_select( int count, nwipe_context_t** c )
  * @modifies   options     Sets program options according to to user input.
  *
  */
+
+	extern int terminate_signal;
 
 	/* Widget labels. */
 	const char* select_title = " Disks and Partitions ";
@@ -449,8 +486,8 @@ void nwipe_gui_select( int count, nwipe_context_t** c )
 			{
 				case NWIPE_SELECT_TRUE:
 
-					wprintw( main_window, " [wipe] %i. %s - %s %s (%s)", (i + offset + 1),
-										c[i+offset]->device_name,
+					wprintw( main_window, " [wipe] %i. %s - %s, S/N:%s, (%s)", (i + offset + 1),
+										c[i+offset]->device_name+SKIP_DEV_PREFIX,
 										c[i+offset]->label,
 										c[i+offset]->serial_no,
 										c[i+offset]->device_size_text );
@@ -458,8 +495,8 @@ void nwipe_gui_select( int count, nwipe_context_t** c )
 
 				case NWIPE_SELECT_FALSE:
 					/* Print an element that is not selected. */
-					wprintw( main_window, " [    ] %i. %s - %s %s (%s)", (i + offset +1),
-										c[i+offset]->device_name,
+					wprintw( main_window, " [    ] %i. %s - %s, S/N:%s, (%s)", (i + offset +1),
+										c[i+offset]->device_name+SKIP_DEV_PREFIX,
 										c[i+offset]->label,
 										c[i+offset]->serial_no,
 										c[i+offset]->device_size_text );
@@ -468,8 +505,8 @@ void nwipe_gui_select( int count, nwipe_context_t** c )
 				case NWIPE_SELECT_TRUE_PARENT:
 
 					/* This element will be wiped when its parent is wiped. */
-					wprintw( main_window, " [****] %i. %s - %s %s (%s)", (i + offset +1),
-										c[i+offset]->device_name,
+					wprintw( main_window, " [****] %i. %s - %s, S/N:%s, (%s)", (i + offset +1),
+										c[i+offset]->device_name+SKIP_DEV_PREFIX,
 										c[i+offset]->label,
 										c[i+offset]->serial_no,
 										c[i+offset]->device_size_text );
@@ -478,8 +515,8 @@ void nwipe_gui_select( int count, nwipe_context_t** c )
 				case NWIPE_SELECT_FALSE_CHILD:
 
 					/* We can't wipe this element because it has a child that is being wiped. */
-					wprintw( main_window, " [----] %i. %s - %s %s (%s)", (i + offset +1),
-										c[i+offset]->device_name,
+					wprintw( main_window, " [----] %i. %s - %s, S/N:%s, (%s)", (i + offset +1),
+										c[i+offset]->device_name+SKIP_DEV_PREFIX,
 										c[i+offset]->label,
 										c[i+offset]->serial_no,
 										c[i+offset]->device_size_text );
@@ -521,9 +558,17 @@ void nwipe_gui_select( int count, nwipe_context_t** c )
 
 		/* Refresh the window. */
 		wrefresh( main_window );
-
-		/* Get user input. */
-		keystroke = getch();
+      
+		/* Wait 250ms for input from getch, if nothing getch will then continue,
+		 * This is necessary so that the while loop can be exited by the
+		 * terminate_signal e.g.. the user pressing control-c to exit.
+		 * Do not change this value, a higher value means the keys become
+		 * sluggish, any slower and more time is spent unnecessarily looping
+		 * which wastes CPU cycles.
+		 */
+		timeout(250); /* block getch() for 250ms */
+		keystroke = getch(); /* Get user input. */
+		timeout(-1); /* Switch back to blocking mode */
 
 		switch( keystroke )
 		{
@@ -750,10 +795,11 @@ void nwipe_gui_select( int count, nwipe_context_t** c )
 				/* Run the noblank dialog. */
 				nwipe_gui_noblank();
 				break;
+            
 
 		} /* keystroke switch */
 
-	} while( keystroke != 'S' && keystroke != ERR );
+	} while( keystroke != 'S' && terminate_signal !=1);
 
 	/* Clear the main window. */
 	werase( main_window );
@@ -857,6 +903,8 @@ void nwipe_gui_rounds( void )
 
 	/* Input buffer. */
 	int keystroke;
+   
+   extern int terminate_signal;
 
 	/* Erase the footer window. */
 	werase( footer_window );
@@ -904,8 +952,16 @@ void nwipe_gui_rounds( void )
 		/* Refresh the window. */
 		wrefresh( main_window );
 
-		/* Get a keystroke. */
-		keystroke = getch();
+		/* Wait 250ms for input from getch, if nothing getch will then continue,
+		 * This is necessary so that the while loop can be exited by the
+		 * terminate_signal e.g.. the user pressing control-c to exit.
+		 * Do not change this value, a higher value means the keys become
+		 * sluggish, any slower and more time is spent unnecessarily looping
+		 * which wastes CPU cycles.
+		 */
+		timeout(250);        /* block getch() for 250ms */
+		keystroke = getch(); /* Get a keystroke. */
+		timeout(-1);         /* Switch back to blocking mode */
 
 		switch( keystroke )
 		{
@@ -945,7 +1001,7 @@ void nwipe_gui_rounds( void )
 		/* Hide the cursor. */
 		curs_set( 0 );
 
-	} while( keystroke != 10 && keystroke != ERR );
+	} while( keystroke != 10 && terminate_signal !=1 );
 
 	if( focus > 0 )
 	{
@@ -969,6 +1025,7 @@ void nwipe_gui_prng( void )
 
 	extern nwipe_prng_t nwipe_twister;
 	extern nwipe_prng_t nwipe_isaac;
+   extern int terminate_signal;
 
 	/* The number of implemented PRNGs. */
 	const int count = 2;
@@ -1053,8 +1110,16 @@ void nwipe_gui_prng( void )
 		/* Refresh the window. */
 		wrefresh( main_window );
 
-		/* Get a keystroke. */
-		keystroke = getch();
+		/* Wait 250ms for input from getch, if nothing getch will then continue,
+		 * This is necessary so that the while loop can be exited by the
+		 * terminate_signal e.g.. the user pressing control-c to exit.
+		 * Do not change this value, a higher value means the keys become
+		 * sluggish, any slower and more time is spent unnecessarily looping
+		 * which wastes CPU cycles.
+		 */
+		timeout(250);        /* block getch() for 250ms */
+		keystroke = getch(); /* Get a keystroke. */
+		timeout(-1);         /* Switch back to blocking mode */
 
 		switch( keystroke )
 		{
@@ -1088,7 +1153,7 @@ void nwipe_gui_prng( void )
 		} /* switch */
 		
 	}
-	while( keystroke != ERR );
+	while( terminate_signal != 1 );
 
 } /* nwipe_gui_prng */
 
@@ -1103,6 +1168,8 @@ void nwipe_gui_verify( void )
  * @modifies  main_window
  *
  */
+
+   extern int terminate_signal;
 
 	/* The number of definitions in the nwipe_verify_t enumeration. */
 	const int count = 3;
@@ -1188,8 +1255,16 @@ void nwipe_gui_verify( void )
 		/* Refresh the window. */
 		wrefresh( main_window );
 
-		/* Get a keystroke. */
-		keystroke = getch();
+		/* Wait 250ms for input from getch, if nothing getch will then continue,
+		 * This is necessary so that the while loop can be exited by the
+		 * terminate_signal e.g.. the user pressing control-c to exit.
+		 * Do not change this value, a higher value means the keys become
+		 * sluggish, any slower and more time is spent unnecessarily looping
+		 * which wastes CPU cycles.
+		 */
+		timeout(250);        /* block getch() for 250ms */
+		keystroke = getch(); /* Get a keystroke. */
+		timeout(-1);         /* Switch back to blocking mode */
 
 		switch( keystroke )
 		{
@@ -1223,7 +1298,7 @@ void nwipe_gui_verify( void )
 		} /* switch */
 		
 	}
-	while( keystroke != ERR );
+	while( terminate_signal != 1 );
 
 } /* nwipe_gui_verify */
 
@@ -1237,6 +1312,8 @@ void nwipe_gui_noblank( void )
  * @modifies  main_window
  *
  */
+
+   extern int terminate_signal;
 
 	/* The number of options available. */
 	const int count = 2;
@@ -1295,7 +1372,7 @@ void nwipe_gui_noblank( void )
 
 				/*                                 0         1         2         3         4         5         6         7        8  */
 				mvwprintw( main_window, yy++, tab1, "Do not perform a final blanking pass. Leave data as per final wiping pass.  " );
-				mvwprintw( main_window, yy++, tab1, "Any verification options will be ignored. Not compatible with Quick Erase.  " );
+				mvwprintw( main_window, yy++, tab1, "                                                                            " );
 				break;
 
 		} /* switch */
@@ -1309,8 +1386,16 @@ void nwipe_gui_noblank( void )
 		/* Refresh the window. */
 		wrefresh( main_window );
 
-		/* Get a keystroke. */
-		keystroke = getch();
+		/* Wait 250ms for input from getch, if nothing getch will then continue,
+		 * This is necessary so that the while loop can be exited by the
+		 * terminate_signal e.g.. the user pressing control-c to exit.
+		 * Do not change this value, a higher value means the keys become
+		 * sluggish, any slower and more time is spent unnecessarily looping
+		 * which wastes CPU cycles.
+		 */
+		timeout(250);        /* block getch() for 250ms */
+		keystroke = getch(); /* Get a keystroke. */
+		timeout(-1);         /* Switch back to blocking mode */
 
 		switch( keystroke )
 		{
@@ -1345,7 +1430,7 @@ void nwipe_gui_noblank( void )
 		
 	}
 
-	while( keystroke != ERR );
+	while( terminate_signal != 1 );
 } /* nwipe_gui_noblank */
 
 
@@ -1359,8 +1444,10 @@ void nwipe_gui_method( void )
  *
  */
 
+   extern int terminate_signal;
+
 	/* The number of implemented methods. */
-	const int count = 6;
+	const int count = 7;
 
 	/* The first tabstop. */
 	const int tab1 = 2;
@@ -1388,6 +1475,7 @@ void nwipe_gui_method( void )
         if( nwipe_options.method == &nwipe_dod522022m ) { focus = 3; }
         if( nwipe_options.method == &nwipe_gutmann    ) { focus = 4; }
         if( nwipe_options.method == &nwipe_random     ) { focus = 5; }
+        if( nwipe_options.method == &nwipe_verify     ) { focus = 6; }
 
 
 	do
@@ -1405,6 +1493,7 @@ void nwipe_gui_method( void )
                 mvwprintw( main_window, yy++, tab1, "  %s", nwipe_method_label( &nwipe_dod522022m ) );
                 mvwprintw( main_window, yy++, tab1, "  %s", nwipe_method_label( &nwipe_gutmann    ) );
                 mvwprintw( main_window, yy++, tab1, "  %s", nwipe_method_label( &nwipe_random     ) );
+                mvwprintw( main_window, yy++, tab1, "  %s", nwipe_method_label( &nwipe_verify     ) );
                 mvwprintw( main_window, yy++, tab1, "                                             " );
 
 		/* Print the cursor. */
@@ -1481,6 +1570,16 @@ void nwipe_gui_method( void )
 				mvwprintw( main_window, yy++, tab1, "This method has a medium security level with 4 rounds, and a high security   " );
 				mvwprintw( main_window, yy++, tab1, "level with 8 rounds.                                                         " );
 				break;
+			
+			case 6:
+
+				mvwprintw( main_window, 2, tab2, "syslinux.cfg: nuke=\"nwipe --method verify\"" );
+				mvwprintw( main_window, 3, tab2, "Security Level: None" );
+
+				/*                                 0         1         2         3         4         5         6         7         8  */
+				mvwprintw( main_window, yy++, tab1, "This method only reads the device and checks that it is all zero.            " );
+
+				break;
 
 		} /* switch */
 
@@ -1493,8 +1592,16 @@ void nwipe_gui_method( void )
 		/* Refresh the window. */
 		wrefresh( main_window );
 
-		/* Get a keystroke. */
-		keystroke = getch();
+		/* Wait 250ms for input from getch, if nothing getch will then continue,
+		 * This is necessary so that the while loop can be exited by the
+		 * terminate_signal e.g.. the user pressing control-c to exit.
+		 * Do not change this value, a higher value means the keys become
+		 * sluggish, any slower and more time is spent unnecessarily looping
+		 * which wastes CPU cycles.
+		 */
+		timeout(250);        /* block getch() for 250ms */
+		keystroke = getch(); /* Get a keystroke. */
+		timeout(-1);         /* Switch back to blocking mode */
 
 		switch( keystroke )
 		{
@@ -1519,7 +1626,7 @@ void nwipe_gui_method( void )
 
 		} /* switch */
 
-	} while( keystroke != KEY_ENTER && keystroke != ' ' && keystroke != 10 && keystroke != ERR );
+	} while( keystroke != KEY_ENTER && keystroke != ' ' && keystroke != 10 && terminate_signal != 1 );
 
 
         switch( focus )
@@ -1546,6 +1653,10 @@ void nwipe_gui_method( void )
 
                 case 5:
                         nwipe_options.method = &nwipe_random;
+                        break;
+                
+                case 6:
+                        nwipe_options.method = &nwipe_verify;
                         break;
         }
 
@@ -1618,6 +1729,8 @@ void *nwipe_gui_status( void *ptr )
  * @modifies  c[].throughput  Updates the i/o throughput value. 
  *
  */
+
+   extern int terminate_signal;
 
  	nwipe_thread_data_ptr_t *nwipe_thread_data_ptr;
  	nwipe_thread_data_ptr = (nwipe_thread_data_ptr_t *) ptr;
@@ -1705,7 +1818,7 @@ void *nwipe_gui_status( void *ptr )
 	nwipe_gui_title( footer_window, nwipe_buttons3 );
 	wrefresh( footer_window );
 
-	while ( nwipe_active ) {
+	while ( nwipe_active && terminate_signal != 1) {
 
 		/* Get the current time. */
 		nwipe_time_now = time( NULL );
@@ -1819,12 +1932,12 @@ void *nwipe_gui_status( void *ptr )
 				/* Print the context label. */
 				if ( strlen((const char*)c[i]->serial_no) )	
 				{
-					mvwprintw( main_window, yy++, 2, "%s - %s (%s)", c[i]->device_name,
+					mvwprintw( main_window, yy++, 2, "%s - %s (S/N:%s)", c[i]->device_name+SKIP_DEV_PREFIX,
 												c[i]->label,
 												c[i]->serial_no);
 				}
 				else {
-					mvwprintw( main_window, yy++, 2, "%s - %s", c[i]->device_name,
+					mvwprintw( main_window, yy++, 2, "%s - %s", c[i]->device_name+SKIP_DEV_PREFIX,
 											c[i]->label );
 				}
 
@@ -2046,6 +2159,7 @@ int compute_stats(void *ptr)
 
 	nwipe_misc_thread_data->throughput = 0;
 	nwipe_misc_thread_data->maxeta = 0;
+	nwipe_misc_thread_data->errors = 0;
 	
 	/* Enumerate all contexts to compute statistics. */
 	for( i = 0 ; i < count ; i++ )
